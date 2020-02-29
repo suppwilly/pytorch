@@ -1,14 +1,14 @@
 #include <torch/csrc/jit/api/function.h>
-#include <torch/csrc/jit/passes/inliner.h>
 
-#include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
+
 namespace {
-FunctionSchema defaultSchemaFor(const Function& function) {
-  std::vector<Argument> args;
-  std::vector<Argument> returns;
+c10::FunctionSchema defaultSchemaFor(const Function& function) {
+  std::vector<c10::Argument> args;
+  std::vector<c10::Argument> returns;
   Graph& g = *function.graph();
   size_t num_inputs = function.num_inputs();
   for (size_t i = 0; i < num_inputs; ++i) {
@@ -24,47 +24,33 @@ FunctionSchema defaultSchemaFor(const Function& function) {
 }
 } // namespace
 
-void placeholderCreator(Function&) {
-  throw RecursiveMethodCallError();
+Function& Function::setSchema(c10::FunctionSchema schema) {
+  schema_ = std::make_unique<c10::FunctionSchema>(std::move(schema));
+  return *this;
 }
 
-void Function::run(Stack& stack) {
-  get_executor().run(stack);
-}
-
-void Function::run(Stack&& stack) {
-  run(stack);
-}
-
-IValue Function::operator()(
-    std::vector<IValue> stack,
-    const Kwargs& kwargs) {
-  getSchema().checkAndNormalizeInputs(stack, kwargs);
-  run(stack);
-  return stack.front();
-}
-
-void Function::ensure_defined() {
-  if (function_creator_) {
-    auto creator = function_creator_;
-    function_creator_ = placeholderCreator;
-    creator(*this);
-    function_creator_ = nullptr;
-  }
-  check_single_output();
-}
-
-const FunctionSchema& Function::getSchema() const {
+const c10::FunctionSchema& Function::getSchema() const {
   if (schema_ == nullptr) {
-    schema_ = make_unique<FunctionSchema>(defaultSchemaFor(*this));
+    schema_ = std::make_unique<c10::FunctionSchema>(defaultSchemaFor(*this));
   }
   return *schema_;
 }
 
-void preoptimizeGraph(std::shared_ptr<Graph>& graph) {
-  // TODO: Invoke cleanup passes before and after inlining to reduce amount of
-  // code we're copying.
-  Inline(*graph);
+void Function::check_single_output() {
+  TORCH_CHECK(
+      graph()->outputs().size() == 1,
+      "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
+}
+
+size_t Function::num_inputs() const {
+  return graph()->inputs().size();
+}
+
+std::string Function::pretty_print_schema() const {
+  AT_ASSERT(schema_);
+  std::stringstream ss;
+  ss << *schema_;
+  return ss.str();
 }
 
 } // namespace jit
